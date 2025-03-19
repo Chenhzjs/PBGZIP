@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <cstdint>
 
 std::vector<uint8_t> serialize(const std::string& input);
 
