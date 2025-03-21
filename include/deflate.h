@@ -18,10 +18,10 @@ struct LZ77Token {
 
 
 struct HuffmanNode {
-    char data;
+    uint16_t data;
     int freq;
     HuffmanNode *left, *right;
-    HuffmanNode(char d, int f) : data(d), freq(f), left(nullptr), right(nullptr) {}
+    HuffmanNode(uint16_t d, int f) : data(d), freq(f), left(nullptr), right(nullptr) {}
 };
 
 struct Compare {

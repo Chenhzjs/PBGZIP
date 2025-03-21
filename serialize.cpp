@@ -29,6 +29,12 @@ std::vector<uint8_t> serialize(const char input) {
     return {static_cast<uint8_t>(input)};
 }
 
+std::vector<uint8_t> serialize(const uint16_t input) {
+    std::vector<uint8_t> serialized_data(sizeof(input));
+    std::memcpy(serialized_data.data(), &input, sizeof(input));
+    return serialized_data;
+}
+
 std::string deserialize_string(std::vector<uint8_t>& compressed_data) {
     if (compressed_data.size() < sizeof(uint32_t)) throw std::runtime_error("Not enough data to deserialize string");
 
@@ -52,18 +58,19 @@ int deserialize_int(std::vector<uint8_t>& compressed_data) {
 }
 
 // 反序列化字符
-char deserialize_char(std::vector<uint8_t>& compressed_data) {
+uint8_t deserialize_uint8_t(std::vector<uint8_t>& compressed_data) {
     if (compressed_data.empty()) throw std::runtime_error("Not enough data to deserialize char");
 
-    char result = static_cast<char>(compressed_data[0]);
+    uint8_t result = static_cast<uint8_t>(compressed_data[0]);
     compressed_data.erase(compressed_data.begin());
     return result;
 }
 
-uint8_t deserialize_uint8_t(std::vector<uint8_t>& compressed_data) {
+uint16_t deserialize_uint16_t(std::vector<uint8_t>& compressed_data) {
     if (compressed_data.empty()) throw std::runtime_error("Not enough data to deserialize uint8_t");
 
-    uint8_t result = compressed_data[0];
-    compressed_data.erase(compressed_data.begin());
+    uint16_t result;
+    std::memcpy(&result, compressed_data.data(), sizeof(result));
+    compressed_data.erase(compressed_data.begin(), compressed_data.begin() + sizeof(result));
     return result;
 }

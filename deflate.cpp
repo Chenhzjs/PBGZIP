@@ -88,7 +88,10 @@ std::vector<LZ77Token> lz77_compress(const std::string& input, int window_size, 
             next_char = input[i + best_length];
         }
         compressed.push_back({best_offset, best_length, next_char});
-        if (best_length == 0) i += best_length + 1;
+        if (best_length == 0) {
+            i += best_length + 1;
+            // std::cout << "next_char: " << next_char << std::endl;
+        }
         else i += best_length;
     }
     lz77_data = compressed;
@@ -106,8 +109,9 @@ std::string lz77_decompress(const std::vector<LZ77Token>& compressed) {
             decompressed += decompressed[start + j];
         }
         if (token.next_char != '\0' || i != compressed.size() - 1) {
-            if (token.length != 0) {
+            if (token.length == 0) {
                 decompressed += token.next_char;
+                // std::cout << "decompressed: " << token.next_char << std::endl;
             }
         }
         i ++;
@@ -203,84 +207,273 @@ std::vector<uint8_t> gzip_compress(const std::string& input) {
     std::vector<uint16_t> offset_huff;
     std::vector<uint8_t> tmp_vec;
     for (const auto& token : lz77_encoded) {
-        char_length_huff.push_back(static_cast<uint16_t>(token.next_char));
+        
         if (token.length != 0) {
             char_length_huff.push_back(static_cast<uint16_t>(token.length + 256));
-        }
-        if (token.length != 0) {
             offset_huff.push_back(static_cast<uint16_t>(token.offset));
+            // std::cout << "length: " << token.length << " offset: " << token.offset << std::endl;
+        } else {
+            char_length_huff.push_back(static_cast<uint16_t>(token.next_char));
+            // std::cout << "next_char: " << token.next_char << std::endl;
         }
+
         
     }
     std::vector<std::pair<uint16_t, std::string>> char_huffman_table = huffman_compress(char_length_huff);
     std::unordered_map<uint16_t, std::string> char_huffman_map;
-    std::cout << "char_huffman_table size: " << char_huffman_table.size() << std::endl;
+    // std::cout << "char_huffman_table size: " << char_huffman_table.size() << std::endl;
     for (const auto& pair : char_huffman_table) {
         char_huffman_map[pair.first] = pair.second;
+        // std::cout << "char_huffman_table: " << pair.first << " " << pair.second << std::endl;
     }
     std::vector<std::pair<uint16_t, std::string>> offset_huffman_table = huffman_compress(offset_huff);
     std::unordered_map<uint16_t, std::string> offset_huffman_map;
-    std::cout << "offset_huffman_table size: " << offset_huffman_table.size() << std::endl;
+    // std::cout << "offset_huffman_table size: " << offset_huffman_table.size() << std::endl;
     for (const auto& pair : offset_huffman_table) {
         offset_huffman_map[pair.first] = pair.second;
     }
     
     // write char_huffman_table
-    huffman_encoded.push_back(char_huffman_table.size());
+    tmp_vec = serialize(static_cast<int>(char_huffman_table.size()));
+    huffman_encoded.insert(huffman_encoded.end(), tmp_vec.begin(), tmp_vec.end());
     for (const auto& pair : char_huffman_table) {
-        huffman_encoded.push_back(pair.first);
+        tmp_vec = serialize(pair.first);
+        huffman_encoded.insert(huffman_encoded.end(), tmp_vec.begin(), tmp_vec.end());
         uint8_t length = pair.second.length();
         huffman_encoded.push_back(length);
+        // std::cout << "char_huffman_table: " << pair.first << " " << static_cast<int>(length) << std::endl;
     }
     // write offset_huffman_table
-    huffman_encoded.push_back(offset_huffman_table.size());
+    tmp_vec = serialize(static_cast<int>(offset_huffman_table.size()));
+    huffman_encoded.insert(huffman_encoded.end(), tmp_vec.begin(), tmp_vec.end());
     for (const auto & pair : offset_huffman_table) {
-        huffman_encoded.push_back(pair.first);
+        tmp_vec = serialize(pair.first);
+        huffman_encoded.insert(huffman_encoded.end(), tmp_vec.begin(), tmp_vec.end());
         uint8_t length = pair.second.length();
         huffman_encoded.push_back(length);
     }
-    
-    std::cout << "huffman_encoded size: " << huffman_encoded.size() << std::endl;
+    // std::cout << "huffman_encoded size: " << huffman_encoded.size() << std::endl;
+
+
+
     // encode char_huff
     std::string bit_string_char;
     for (const auto& c : char_length_huff) {
         bit_string_char += char_huffman_map[c];
+        // std::cout << "char_huffman_map: " << c << " " << char_huffman_map[c] << std::endl;
     }
-    tmp_vec = serialize(static_cast<int>(bit_string_char.size()));
+    // for (int i = 0; i < bit_string_char.size(); i ++) {
+    //     std::cout << bit_string_char[i];
+    //     if (i % 8 == 7) {
+    //         std::cout << " ";
+    //     }
+    // }
+    // std::cout << std::endl;
+    tmp_vec = serialize(static_cast<int>(char_length_huff.size()));
     huffman_encoded.insert(huffman_encoded.end(), tmp_vec.begin(), tmp_vec.end());
-    std::cout << "char_huff size: " << char_length_huff.size() << std::endl;
+    // std::cout << "char_huff size: " << char_length_huff.size() << std::endl;
+    int tmp = 0;
+    // std::cout << bit_string_char.size() << " " << bit_string_char.size() / 8 + 1<< std::endl;
+
     for (int i = 0; i < bit_string_char.size(); i += 8) {
         uint8_t byte = 0;
-        for (int j = 0; j < 8 && i + j < bit_string_char.size(); j++) {
+        int j;
+        for (j = 0; j < 8 && i + j < bit_string_char.size(); j ++) {
             byte = (byte << 1) | (bit_string_char[i + j] - '0');
         }
+        if (i + j == bit_string_char.size()) {
+            byte = byte << (8 - j);
+        }
         huffman_encoded.push_back(byte);
+        // std::cout << static_cast<int>(byte) << std::endl;
+        // tmp ++;
     }
-    std::cout << "huffman_encoded size: " << huffman_encoded.size() << std::endl;
+    // std::cout << "tmp: " << tmp << std::endl;
+    // std::cout << "huffman_encoded size: " << huffman_encoded.size() << std::endl;
     // encode offset_offset_huff
     std::string bit_string_offset;
     for (const auto& c : offset_huff) {
         bit_string_offset += offset_huffman_map[c];
     }
-    tmp_vec = serialize(static_cast<int>(bit_string_offset.size()));
+    tmp_vec = serialize(static_cast<int>(offset_huff.size()));
     huffman_encoded.insert(huffman_encoded.end(), tmp_vec.begin(), tmp_vec.end());
-    std::cout << "offset_huff size: " << offset_huff.size() << std::endl;
+    // std::cout << "offset_huff size: " << offset_huff.size() << std::endl;
+
     for (int i = 0; i < bit_string_offset.size(); i += 8) {
         uint8_t byte = 0;
-        for (int j = 0; j < 8 && i + j < bit_string_offset.size(); j++) {
+        int j;
+        for (j = 0; j < 8 && i + j < bit_string_offset.size(); j ++) {
             byte = (byte << 1) | (bit_string_offset[i + j] - '0');
+        }
+        if (i + j == bit_string_offset.size()) {
+            byte = byte << (8 - j);
         }
         huffman_encoded.push_back(byte);
     }
-    std::cout << "huffman_encoded size: " << huffman_encoded.size() << std::endl;
+    // std::cout << "huffman_encoded size: " << huffman_encoded.size() << std::endl;
     std::cout << "Compressed " << input.size() << " bytes into " << huffman_encoded.size() << " bytes" << std::endl;
     return huffman_encoded;
 }
 
+std::string binary_add_one(const std::string& binary) {
+    std::string result = binary;
+    int carry = 1;  
+
+    for (int i = result.size() - 1; i >= 0; i--) {
+        if (result[i] == '0') {
+            result[i] = '1';
+            carry = 0;  
+            break;
+        } else {
+            result[i] = '0';  
+        }
+    }
+
+    if (carry) {
+        result = "1" + result;  
+    }
+
+    return result;
+}
+
+std::string binary_left_shift(const std::string& binary) {
+    return binary + "0";
+}
+
+void get_canonical_codes(std::vector<std::pair<uint16_t, uint8_t>>& codes, std::unordered_map<std::string, uint16_t>& huffman_map) {
+    int i = 0;
+    int last_length = -1;
+    // std::cout << "codes size: " << codes.size() << std::endl;
+    std::string code;
+    while (i < codes.size()) {
+        uint16_t symbol = codes[i].first;
+        uint8_t length = codes[i].second;
+        if (last_length == -1) {
+            for (int j = 0; j < length; j ++) {
+                code += "0"; 
+            }
+            // std::cout << "code: " << static_cast<int>(symbol) << " " << code << std::endl;
+        } else {
+            if (length > last_length) {
+                code = binary_left_shift(binary_add_one(code));
+                // std::cout << "code: " << static_cast<int>(symbol) << " " << code << std::endl;
+            } else {
+                code = binary_add_one(code);
+                // std::cout << "code: " << static_cast<int>(symbol) << " " << code << std::endl;
+            }
+        }
+        huffman_map[code] = symbol;
+        i += 1;
+        last_length = length;
+    }
+}
+
 std::string gzip_decompress(const std::vector<uint8_t>& compressed_data) {
     std::vector<LZ77Token> lz77_encoded;
-    
+    std::vector<uint8_t> data = compressed_data;
+
+    int char_length_huff_size = deserialize_int(data);
+    // std::cout << "char_huff_size: " << char_length_huff_size << std::endl;
+    std::vector<std::pair<uint16_t, uint8_t>> char_huffman_table;
+    for (int i = 0; i < char_length_huff_size; i++) {
+        uint16_t symbol = deserialize_uint16_t(data);
+        uint8_t length = deserialize_uint8_t(data);
+        char_huffman_table.push_back({symbol, length});
+        // std::cout << "char_huffman_table: " << static_cast<int>(symbol) << " " << static_cast<int>(length) << std::endl;
+    }
+
+    int offset_huff_size = deserialize_int(data);
+    // std::cout << "offset_huff_size: " << offset_huff_size << std::endl;
+    std::vector<std::pair<uint16_t, uint8_t>> offset_huffman_table;
+    for (int i = 0; i < offset_huff_size; i++) {
+        uint16_t symbol = deserialize_uint16_t(data);
+        uint8_t length = deserialize_uint8_t(data);
+        offset_huffman_table.push_back({symbol, length});
+    }
+
+
+    std::unordered_map<std::string, uint16_t> char_length_huffman_map;
+    std::unordered_map<std::string, uint16_t> offset_huffman_map;
+    get_canonical_codes(char_huffman_table, char_length_huffman_map);
+    for (const auto& pair : char_length_huffman_map) {
+        // std::cout << "char_length_huffman_map: " << pair.second << " " << pair.first << std::endl;
+    }
+    // std::cout << "char_length_huffman_map size: " << char_length_huffman_map.size() << std::endl;
+    get_canonical_codes(offset_huffman_table, offset_huffman_map);
+
+
+    int bit_string_char_size = deserialize_int(data);
+    // std::cout << "bit_string_char_size: " << bit_string_char_size << std::endl;
+    std::vector<uint16_t> bit_string_char_vec;
+    std::string bit_string_char = "";
+    int count = 0;
+    int tmp = 0;
+    while (1) {
+        uint8_t byte = deserialize_uint8_t(data);
+        // std::cout << bit_string_char << " " << static_cast<int>(byte) << std::endl;
+        // tmp ++;
+        for (int i = 7; i >= 0; i --) {
+            bit_string_char = bit_string_char + ((byte >> i) & 1 ? "1" : "0");
+            if (char_length_huffman_map.find(bit_string_char) != char_length_huffman_map.end()) {
+                // std::cout << "number = " << char_length_huffman_map[bit_string_char] << std::endl;
+                bit_string_char_vec.push_back(char_length_huffman_map[bit_string_char]);
+                bit_string_char = "";
+                count ++;
+                // std::cout << "count: " << count << std::endl;
+            } 
+            if (count == bit_string_char_size) {
+                break;
+            }
+        }
+        if (count == bit_string_char_size) {
+            break;
+        }
+    }
+    // std::cout << "tmp: " << tmp << std::endl;
+    int bit_string_offset_size = deserialize_int(data);
+    // std::cout << "bit_string_offset_size: " << bit_string_offset_size << std::endl;
+    std::vector<uint16_t> bit_string_offset_vec;
+    std::string bit_string_offset = "";
+    count = 0;
+    while(1) {
+        uint8_t byte = deserialize_uint8_t(data);
+        for (int i = 7; i >= 0; i --) {
+            bit_string_offset = bit_string_offset + ((byte >> i) & 1 ? "1" : "0");
+            if (offset_huffman_map.find(bit_string_offset) != offset_huffman_map.end()) {
+                bit_string_offset_vec.push_back(offset_huffman_map[bit_string_offset]);
+                bit_string_offset = "";
+                count ++;
+            }
+            if (count == bit_string_offset_size) {
+                break;
+            }
+        }
+        if (count == bit_string_offset_size) {
+            break;
+        }
+    }
+    // std::cout << "bit_string_offset_vec size: " << bit_string_offset_vec.size() << std::endl;
+    for (auto c : bit_string_char_vec) {
+        // std::cout << c << " ";
+        int length = 0;
+        int offset = 0;
+        char next_char;
+        if (c < 256) {
+            next_char = static_cast<char>(c);
+            // std::cout << "next_char: " << next_char << std::endl;
+            length = 0;
+            offset = 0;
+        } else {
+            length = c - 256;
+            offset = bit_string_offset_vec[0];
+            bit_string_offset_vec.erase(bit_string_offset_vec.begin());
+            // std::cout << "length: " << length << " offset: " << offset << std::endl;
+            // next_char = static_cast<char>(bit_string_char_vec[0]);
+        }
+        lz77_encoded.push_back({offset, length, next_char});
+    }
     std::cout << "Decompressed " << compressed_data.size() << " bytes into " << lz77_encoded.size() << " tokens" << std::endl;
+    // return "";
     return lz77_decompress(lz77_encoded);
 }
 

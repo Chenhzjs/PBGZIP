@@ -50,32 +50,23 @@ bool diff(const std::string& a, const std::string& b) {
 int main() {
     // std::string text = "abcabcabcabcabcabcabcabcabc";
     // std::string text = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaababfbadbfdbadfsadfdsafadsfdsafdasfdsfewgjfkijvoasdjoas";
-    std::string text = read("random_data.txt");
+    std::string text = read("data/random_data.txt");
     // std::vector<LZ77Token> compressed = lz77_compress(text);
     std::vector<uint8_t> compressed_data = gzip_compress(text);
-    extern int int_tot;
-    extern int string_tot;
-    extern int char_tot;
-    extern int byte_tot;
-    std::cout << "int: " << int_tot << std::endl;   
-    std::cout << "string: " << string_tot << std::endl;
-    std::cout << "char: " << char_tot << std::endl;
-    std::cout << "byte: " << byte_tot << std::endl;
     // for (auto c : compressed_data) {
-
     //     for (int i = 7; i >= 0; i --) {
     //         std::cout << ((c >> i) & 1);
     //     }
     // }
     // std::cout << std::endl;
-    // std::string decompressed_data = gzip_decompress(compressed_data);
+    std::string decompressed_data = gzip_decompress(compressed_data);
     // std::cout << text << std::endl;
     // std::cout << decompressed_data << std::endl;
     // write("decompressed.bin", decompressed_data);
-    // if (diff(text, decompressed_data)) {
-    //     std::cout << "Decompressed data is correct" << std::endl;
-    // } else {
-    //     std::cerr << "Decompressed data is incorrect" << std::endl;
-    // }
+    if (diff(text, decompressed_data)) {
+        std::cout << "Decompressed data is correct" << std::endl;
+    } else {
+        std::cerr << "Decompressed data is incorrect" << std::endl;
+    }
     return 0;
 }
