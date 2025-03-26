@@ -2,8 +2,12 @@ cmake_minimum_required(VERSION 3.12)
 project(ParallelBGZIP)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_C_COMPILER gcc-14)
-set(CMAKE_CXX_COMPILER g++-14)
+# if is macOS
+if(APPLE)
+    set(CMAKE_C_COMPILER gcc-14)
+    set(CMAKE_CXX_COMPILER g++-14)
+endif()
+
 
 include_directories(include third_party/include)
 include_directories(/usr/local/include)

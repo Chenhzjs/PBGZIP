@@ -3,11 +3,12 @@
 #include <algorithm>
 #include <execution>
 #include <omp.h>
+#include <chrono>
 // KMP algorithm for pattern matching
 std::string lz_out;
 
 tbb::concurrent_vector<ParallelLZ77> lz77_concurrent_data;
-
+std::vector<int> lz77_num_per_thread(128);
 std::vector<uint8_t> compressed_data;
 
 std::vector<std::string> split(const std::string &text, int n) {
@@ -98,7 +99,7 @@ void lz77_compress(const std::string& input, int now_thread, int window_size, in
         std::string lookahead = input.substr(i, lookahead_size);
         int best_length = 0;
         int best_offset = 0;
-        char next_char = '\0';
+        uint8_t next_char = '\0';
         for (int j = 2; j < lookahead.size() && j < window.size(); j ++) {
             int matches = find_last_match(window, lookahead.substr(0, j + 1));
             // std::cout << window << " " << lookahead.substr(0, j + 1) << " " << matches << std::endl;
@@ -116,6 +117,7 @@ void lz77_compress(const std::string& input, int now_thread, int window_size, in
         LZ77Token token(best_offset, best_length, next_char);
         ParallelLZ77 parallel_lz77(now_thread, token_seq ++, token);
         lz77_concurrent_data.push_back(parallel_lz77);
+        lz77_num_per_thread[now_thread] ++;
         if (best_length == 0) {
             i += best_length + 1;
             // std::cout << "next_char: " << next_char << std::endl;
@@ -129,6 +131,7 @@ void lz77_compress(const std::string& input, int now_thread, int window_size, in
 std::string lz77_decompress(const std::vector<LZ77Token>& compressed) {
     std::string decompressed;
     int i = 0;
+    std::cout << "compressed size: " << compressed.size() << std::endl;
     for (const auto& token : compressed) {
         int start = decompressed.size() - token.offset;
         for (int j = 0; j < token.length; j ++) {
@@ -171,7 +174,7 @@ std::vector<std::pair<uint16_t, std::string>> build_canonical_codes(
         }
         
         std::string code;
-        for (int i = length-1; i >= 0; --i) {
+        for (int i = length - 1; i >= 0; i --) {
             code += ((current_code >> i) & 1) ? '1' : '0';
         }
         
@@ -190,7 +193,9 @@ bool cmp(const std::pair<int, uint16_t>& a, const std::pair<int, uint16_t>& b) {
 std::vector<std::pair<uint16_t, std::string>> huffman_compress(const std::vector<uint16_t>& input) {
 
     std::unordered_map<uint16_t, int> freq;
-    for (uint16_t c : input) freq[c]++;
+    for (uint16_t c : input) {
+        freq[c] ++;
+    }
 
     std::priority_queue<HuffmanNode*, std::vector<HuffmanNode*>, Compare> pq;
     for (auto& pair : freq) {
@@ -243,25 +248,33 @@ std::vector<uint8_t> gzip_compress(const std::string& input, int thread_num) {
         }
         return a.now_thread < b.now_thread;
     });
+    int tot = 0;
+    std::vector<int> start_index;
+    for (int i = 0; i < thread_num; i ++) {
+        start_index.push_back(tot);
+        tot += lz77_num_per_thread[i];
+    }
+    // std::cout << "Total compressed " << tot << " tokens" << std::endl;
     // std::cout << "lz77_concurrent_data size: " << lz77_concurrent_data.size() << std::endl;
     std::vector<uint8_t> huffman_encoded;
     std::vector<uint16_t> char_length_huff;
     std::vector<uint16_t> offset_huff;
     std::vector<uint8_t> tmp_vec;
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    // int tot = 0;
     for (const auto& thread_token : lz77_concurrent_data) {
         // std::cout << thread_token.now_thread << " <" << thread_token.token.offset << ", " << thread_token.token.length << ", " << thread_token.token.next_char << ">" << std::endl;
         auto token = thread_token.token;
-        if (token.length != 0) {
+        if (token.length > 0) {
             char_length_huff.push_back(static_cast<uint16_t>(token.length + 256));
             offset_huff.push_back(static_cast<uint16_t>(token.offset));
-            // std::cout << "length: " << token.length << " offset: " << token.offset << std::endl;
         } else {
             char_length_huff.push_back(static_cast<uint16_t>(token.next_char));
             // std::cout << "next_char: " << token.next_char << std::endl;
         }
-
-        
     }
+    // std::cout << "tot: " << tot << std::endl;
     std::vector<std::pair<uint16_t, std::string>> char_huffman_table = huffman_compress(char_length_huff);
     std::unordered_map<uint16_t, std::string> char_huffman_map;
     // std::cout << "char_huffman_table size: " << char_huffman_table.size() << std::endl;
@@ -354,6 +367,10 @@ std::vector<uint8_t> gzip_compress(const std::string& input, int thread_num) {
         huffman_encoded.push_back(byte);
     }
     // std::cout << "huffman_encoded size: " << huffman_encoded.size() << std::endl;
+    auto end = std::chrono::high_resolution_clock::now();
+
+	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds> (end - start);
+    // std::cout << "time: " << duration.count() / 1000000000.0 << " s" << std::endl;
     std::cout << "Compressed " << input.size() << " bytes into " << huffman_encoded.size() << " bytes" << std::endl;
     return huffman_encoded;
 }
@@ -438,11 +455,12 @@ std::string gzip_decompress(const std::vector<uint8_t>& compressed_data) {
     std::unordered_map<std::string, uint16_t> char_length_huffman_map;
     std::unordered_map<std::string, uint16_t> offset_huffman_map;
     get_canonical_codes(char_huffman_table, char_length_huffman_map);
-    for (const auto& pair : char_length_huffman_map) {
-        // std::cout << "char_length_huffman_map: " << pair.second << " " << pair.first << std::endl;
-    }
+    // for (const auto& pair : char_length_huffman_map) {
+    //     std::cout << "char_length_huffman_map: " << pair.second << " " << pair.first << std::endl;
+    // }
     // std::cout << "char_length_huffman_map size: " << char_length_huffman_map.size() << std::endl;
     get_canonical_codes(offset_huffman_table, offset_huffman_map);
+    // std::cout << "offset_huffman_map size: " << offset_huffman_map.size() << std::endl;
 
 
     int bit_string_char_size = deserialize_int(data);
@@ -451,6 +469,8 @@ std::string gzip_decompress(const std::vector<uint8_t>& compressed_data) {
     std::string bit_string_char = "";
     int count = 0;
     int tmp = 0;
+    auto start = std::chrono::high_resolution_clock::now();
+
     while (1) {
         uint8_t byte = deserialize_uint8_t(data);
         // std::cout << bit_string_char << " " << static_cast<int>(byte) << std::endl;
@@ -474,7 +494,7 @@ std::string gzip_decompress(const std::vector<uint8_t>& compressed_data) {
     }
     // std::cout << "tmp: " << tmp << std::endl;
     int bit_string_offset_size = deserialize_int(data);
-    // std::cout << "bit_string_offset_size: " << bit_string_offset_size << std::endl;
+    std::cout << "bit_string_offset_size: " << bit_string_offset_size << std::endl;
     std::vector<uint16_t> bit_string_offset_vec;
     std::string bit_string_offset = "";
     count = 0;
@@ -495,19 +515,29 @@ std::string gzip_decompress(const std::vector<uint8_t>& compressed_data) {
             break;
         }
     }
+    auto end = std::chrono::high_resolution_clock::now();
+	auto duration = std::chrono::duration_cast<std::chrono::nanoseconds> (end - start);
+    std::cout << "time: " << duration.count() / 1000000000.0 << " s" << std::endl;
     // std::cout << "bit_string_offset_vec size: " << bit_string_offset_vec.size() << std::endl;
+    // int tot = 0;
     for (auto c : bit_string_char_vec) {
         // std::cout << c << " ";
         int length = 0;
         int offset = 0;
-        char next_char;
+        uint8_t next_char;
         if (c < 256) {
-            next_char = static_cast<char>(c);
+            next_char = static_cast<uint8_t>(c);
             // std::cout << "next_char: " << next_char << std::endl;
+            // tot ++;
             length = 0;
             offset = 0;
         } else {
-            length = c - 256;
+            length = static_cast<int>(c) - 256;
+            if (length > 20) {
+                std::cout << "length: " << length << std::endl;
+                throw std::runtime_error("Invalid length");
+            }
+            // tot += length;
             offset = bit_string_offset_vec[0];
             bit_string_offset_vec.erase(bit_string_offset_vec.begin());
             // std::cout << "length: " << length << " offset: " << offset << std::endl;
@@ -515,8 +545,10 @@ std::string gzip_decompress(const std::vector<uint8_t>& compressed_data) {
         }
         lz77_encoded.push_back({offset, length, next_char});
     }
+    // std::cout << "tot: " << tot << std::endl;
     std::cout << "Decompressed " << compressed_data.size() << " bytes into " << lz77_encoded.size() << " tokens" << std::endl;
     // return "";
+
     return lz77_decompress(lz77_encoded);
 }
 

@@ -19,8 +19,8 @@
 struct LZ77Token {
     int offset;
     int length;
-    char next_char;
-    LZ77Token(int o, int l, char c) : offset(o), length(l), next_char(c) {}
+    uint8_t next_char;
+    LZ77Token(int o, int l, uint8_t c) : offset(o), length(l), next_char(c) {}
 };
 
 struct ParallelLZ77 {
