@@ -1,9 +1,33 @@
 #include "deflate.h"
 #include "serialize.h"
 #include <algorithm>
+#include <execution>
+#include <omp.h>
 // KMP algorithm for pattern matching
 std::string lz_out;
-std::vector<LZ77Token> lz77_data;
+
+tbb::concurrent_vector<ParallelLZ77> lz77_concurrent_data;
+
+std::vector<uint8_t> compressed_data;
+
+std::vector<std::string> split(const std::string &text, int n) {
+    std::vector<std::string> parts;
+    if (text.empty() || n <= 0) return parts; 
+
+    int total_size = text.size();
+    int part_size = total_size / n;
+    int remainder = total_size % n; 
+
+    int start = 0;
+    for (int i = 0; i < n; i++) {
+        int current_part_size = part_size + (i < remainder ? 1 : 0); 
+        parts.push_back(text.substr(start, current_part_size));
+        start += current_part_size;
+    }
+
+    return parts;
+}
+
 int byte_tot = 0;
 int kmp(const std::string& text, const std::string& pattern) {
     std::vector<int> lps(pattern.size(), 0);
@@ -60,13 +84,15 @@ int find_last_match(const std::string& text, const std::string& pattern) {
     
     return (pos == -1) ? -1 : (text.size() - pos - pattern.size());
 }
-std::vector<LZ77Token> lz77_compress(const std::string& input, int window_size, int lookahead_size) {
-    std::vector<LZ77Token> compressed;
+void lz77_compress(const std::string& input, int now_thread, int window_size, int lookahead_size) {
     int i = 0;
     /*
     |max(0, i - window_size)|<-- window_size -->|i|<-- lookahead_size -->|
     */
+    int token_seq = 0;
+
     while (i < input.size()) {
+        
         int start = std::max(0, i - window_size);
         std::string window = input.substr(start, i - start);
         std::string lookahead = input.substr(i, lookahead_size);
@@ -87,16 +113,16 @@ std::vector<LZ77Token> lz77_compress(const std::string& input, int window_size, 
         if (i + best_length < input.size()) {
             next_char = input[i + best_length];
         }
-        compressed.push_back({best_offset, best_length, next_char});
+        LZ77Token token(best_offset, best_length, next_char);
+        ParallelLZ77 parallel_lz77(now_thread, token_seq ++, token);
+        lz77_concurrent_data.push_back(parallel_lz77);
         if (best_length == 0) {
             i += best_length + 1;
             // std::cout << "next_char: " << next_char << std::endl;
         }
         else i += best_length;
     }
-    lz77_data = compressed;
-    std::cout << "Compressed " << input.size() << " bytes into " << compressed.size() << " tokens" << std::endl;
-    return compressed;
+    return;
 }
 
 
@@ -200,14 +226,31 @@ std::vector<std::pair<uint16_t, std::string>> huffman_compress(const std::vector
 
 
 
-std::vector<uint8_t> gzip_compress(const std::string& input) {
-    std::vector<LZ77Token> lz77_encoded = lz77_compress(input);
+std::vector<uint8_t> gzip_compress(const std::string& input, int thread_num) {
+    std::vector<std::string> parts = split(input, thread_num);
+    // for (int i = 0; i < parts.size(); i ++) {
+    //     std::cout << parts[i] << std::endl;
+    // }
+    // std::cout << std::endl;
+    #pragma omp parallel for num_threads(thread_num) schedule(static)
+    for (int i = 0; i < parts.size(); i ++) {
+        lz77_compress(parts[i], i);
+        // std::cout << i << " " << parts[i] << std::endl;
+    }
+    tbb::parallel_sort(lz77_concurrent_data.begin(), lz77_concurrent_data.end(), [](const ParallelLZ77& a, const ParallelLZ77& b) {
+        if (a.now_thread == b.now_thread) {
+            return a.token_seq < b.token_seq;
+        }
+        return a.now_thread < b.now_thread;
+    });
+    // std::cout << "lz77_concurrent_data size: " << lz77_concurrent_data.size() << std::endl;
     std::vector<uint8_t> huffman_encoded;
     std::vector<uint16_t> char_length_huff;
     std::vector<uint16_t> offset_huff;
     std::vector<uint8_t> tmp_vec;
-    for (const auto& token : lz77_encoded) {
-        
+    for (const auto& thread_token : lz77_concurrent_data) {
+        // std::cout << thread_token.now_thread << " <" << thread_token.token.offset << ", " << thread_token.token.length << ", " << thread_token.token.next_char << ">" << std::endl;
+        auto token = thread_token.token;
         if (token.length != 0) {
             char_length_huff.push_back(static_cast<uint16_t>(token.length + 256));
             offset_huff.push_back(static_cast<uint16_t>(token.offset));

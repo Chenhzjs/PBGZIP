@@ -21,6 +21,9 @@ std::string read(const std::string& filename) {
     std::cout << "Read " << content.size() << " bytes from " << filename << std::endl;
     return content;
 }
+std::vector<uint8_t> stringToU8(const std::string& s) {
+    return std::vector<uint8_t>(s.begin(), s.end());
+}
 
 void write(const std::string& filename, const std::string& content) {
     std::ofstream file(filename, std::ios::binary);
@@ -47,26 +50,35 @@ bool diff(const std::string& a, const std::string& b) {
 
     return true;
 }
-int main() {
+
+
+
+int main(int argc, char* argv[]) {
     // std::string text = "abcabcabcabcabcabcabcabcabc";
     // std::string text = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaababfbadbfdbadfsadfdsafadsfdsafdasfdsfewgjfkijvoasdjoas";
-    std::string text = read("data/random_data.txt");
+    if (argc != 5) {
+        std::cerr << "Usage: " << argv[0] << " <input file> <output file> <thread num> <-c/-x>" << std::endl;
+        return 1;
+    }
+    std::string input = read(argv[1]);
+    std::string output = argv[2];
+    int thread_num = std::stoi(argv[3]);
+    std::string mode = argv[4];
+    // std::string input = "abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc";
     // std::vector<LZ77Token> compressed = lz77_compress(text);
-    std::vector<uint8_t> compressed_data = gzip_compress(text);
-    // for (auto c : compressed_data) {
-    //     for (int i = 7; i >= 0; i --) {
-    //         std::cout << ((c >> i) & 1);
-    //     }
-    // }
-    // std::cout << std::endl;
-    std::string decompressed_data = gzip_decompress(compressed_data);
-    // std::cout << text << std::endl;
-    // std::cout << decompressed_data << std::endl;
-    // write("decompressed.bin", decompressed_data);
-    if (diff(text, decompressed_data)) {
-        std::cout << "Decompressed data is correct" << std::endl;
-    } else {
-        std::cerr << "Decompressed data is incorrect" << std::endl;
+    if (mode == "-c") {
+        std::vector<uint8_t> compressed_data = gzip_compress(input, thread_num);
+        write(output, std::string(compressed_data.begin(), compressed_data.end()));
+    }
+    else if (mode == "-x") {
+        std::string compressed_data = read(argv[1]);
+        std::vector<uint8_t> compressed_data_u8 = stringToU8(compressed_data);
+        std::string decompressed_data = gzip_decompress(compressed_data_u8);
+        write(output, decompressed_data);
+    }
+    else {
+        std::cerr << "Usage: " << argv[0] << " <input file> <output file> <thread num> <-c/-x>" << std::endl;
+        return 1;
     }
     return 0;
 }
