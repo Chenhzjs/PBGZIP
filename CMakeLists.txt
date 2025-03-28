@@ -13,11 +13,12 @@ include_directories(include third_party/include)
 include_directories(/usr/local/include)
 
 find_package(TBB REQUIRED)
+find_package(ZLIB REQUIRED)
 
 add_executable(deflate deflate.cpp main.cpp serialize.cpp)
 
 target_compile_options(deflate PRIVATE -fopenmp)
 
-target_link_libraries(deflate TBB::tbb gomp)
+target_link_libraries(deflate TBB::tbb gomp ZLIB::ZLIB)
 
 add_executable(generate generate.cpp)
