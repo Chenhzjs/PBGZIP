@@ -1,4 +1,4 @@
-# Paralleled Blocked GZIP
+# Paralleled Block GZIP
 
 In the final version, you don't need to install TBB library if you delete the TBB header in the source code (I'm too lazy to delete this. XD).
 
