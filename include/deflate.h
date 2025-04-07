@@ -38,7 +38,7 @@ struct HuffmanNode {
 
 
 
-int findNextMagicNumber(const std::vector<uint8_t>& compressed_data, int start);
+int findNextMagicNumber(std::ifstream& in);
 
 std::vector<LZ77Token> lz77_compress(const std::string& input, int window_size = MAX_WINDOW_SIZE, int lookahead_size = MAX_LOOKAHEAD_SIZE);
 
@@ -50,10 +50,26 @@ std::vector<std::pair<uint16_t, std::string>> huffman_compress(const std::vector
 
 std::vector<uint8_t> gzip_compress(const std::string& input);
 
+class CompressException : public std::exception {
+public:
+    CompressException(const std::string& message) : msg_(message) {}
+    virtual const char* what() const noexcept override {
+        return msg_.c_str();
+    }
+private:
+    std::string msg_;
+};
 
 class CompressedBlockData {
 public:
-    CompressedBlockData(int now_thread) : now_thread(now_thread) {
+    CompressedBlockData(int now_thread, std::string ifile_name, int start_index, int max_count)
+     : now_thread(now_thread), ifile_name(ifile_name), start_index(start_index), max_count(max_count) {
+        ifile.open(ifile_name, std::ios::binary);
+        if (!ifile) {
+            std::cerr << "Error: Unable to open input file " << ifile_name << std::endl;
+            return;
+        }
+        ifile.seekg(start_index);
         std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
         std::string filename = std::to_string(now_thread) + ".tmp";
         std::string temp_file = (temp_dir / filename).string();
@@ -64,14 +80,47 @@ public:
         close();
     }
 
+    void run() {
+        try {
+            while (true) {
+                gets(); 
+                insert();
+            }
+        } catch (const CompressException& e) {
+            flush();
+            // std::cout << "Thread " << now_thread << " finished successfully." << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Exception: " << e.what() << std::endl;
+        }
+    }
+
+    char get() {
+        char byte;
+        if (ifile.get(byte)) {
+            return byte;
+        } else {
+            throw CompressException("End of file reached");
+        }
+    }
+
+    void gets() {
+        ifile.read(bytes, BLOCK_SIZE);
+        if (ifile.gcount() == 0) {
+            throw CompressException("End of file reached");
+        }
+    }
     void push_back(char byte) {
         data += byte;
+        now_count ++;
+        if (now_count >= max_count) {
+            throw CompressException("Reached max count");
+        }
         if (data.size() == BLOCK_SIZE) { 
             write();
         }
     }
 
-    void insert(std::string bytes) {
+    void insert() {
         for (char byte : bytes) {
             push_back(byte);
         }
@@ -90,12 +139,17 @@ public:
 private:
     std::vector<uint8_t> deflate() {
         std::vector<uint8_t> compressed_data = gzip_compress(data);
-        // std::cout << "Compressed " << data.size() << " bytes into " << compressed_data.size() << " bytes" << std::endl;
         return compressed_data;
     }
+    void get_block_data() {
+        int cur_pos = ifile.tellg();
+        if (cur_pos >= start_index + max_count) {
+            return;
+        }
+    }
     void write() {
+
         std::vector<uint8_t> compressed_data = deflate();
-        
         file.write(reinterpret_cast<const char*>(&MAGIC), sizeof(MAGIC));
         file.write(reinterpret_cast<const char*>(&VERSION), sizeof(VERSION));
         uint16_t block_size = compressed_data.size();
@@ -105,22 +159,25 @@ private:
         checksum = crc32(checksum, compressed_data.data(), compressed_data.size());
         file.write(reinterpret_cast<const char*>(&checksum), sizeof(checksum));
         file.flush();
-        // compress_total += 4 + 1 + 2 + compressed_data.size() + 4;
         data.clear();
     }
     void close() {
         if (data.size() > 0) {
             throw std::runtime_error("Data not flushed");
         }
-        // printf("Compressed %d bytes into %d bytes\n", compress_total, file.tellp());
         file.close();
+        ifile.close();
     }
+    char bytes[BLOCK_SIZE];
+    std::ifstream ifile;
+    int start_index = 0;
+    int max_count = 0;
+    int now_count = 0;
     std::string data;
-    // constexpr static int BLOCK_SIZE = 2048 - 4;
     int now_thread = 0;
+    std::string ifile_name;
     std::string file_name;
     std::ofstream file;
-    // int compress_total = 0;
 };
 
 class DepressedBlockData {
@@ -169,6 +226,6 @@ struct Compare {
         return a->freq > b->freq;
     }
 };
-std::vector<DepressedBlockData*> gzip_decompress(const std::vector<uint8_t>& compressed_data, int thread_num);
+std::vector<DepressedBlockData*> gzip_decompress(const std::string input_name, int thread_num);
 
 #endif

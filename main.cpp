@@ -1,6 +1,7 @@
 #include "deflate.h"
 #include <iostream>
 #include <fstream>
+#include <filesystem>
 
 
 void print_LZ77(const std::vector<LZ77Token>& compressed) {
@@ -43,7 +44,7 @@ void write(const std::string& out_filename, std::vector<DepressedBlockData*>& bl
 }
 
 void write(const std::string& out_filename, std::vector<CompressedBlockData*>& blocks) {
-    std::ofstream out_file(out_filename, std::ios::binary | std::ios::trunc);
+    std::ofstream out_file(out_filename, std::ios::binary);
     if (!out_file) {
         std::cerr << "Error: Unable to open output file " << out_filename << std::endl;
         return;
@@ -55,7 +56,6 @@ void write(const std::string& out_filename, std::vector<CompressedBlockData*>& b
             std::cerr << "Warning: Unable to open block file " << block->get_filename() << std::endl;
             continue;  
         }
-
         out_file << in_file.rdbuf();
         in_file.close();
     }
@@ -79,22 +79,22 @@ bool diff(const std::string& a, const std::string& b) {
     return true;
 }
 
-std::vector<std::string> split(const std::string &text, int n) {
-    std::vector<std::string> parts;
-    if (text.empty() || n <= 0) return parts; 
+std::vector<int> get_start_index(const std::string &file_name, int n) {
+    std::vector<int> start_indexes;
 
-    int total_size = text.size();
-    int part_size = total_size / n;
-    int remainder = total_size % n; 
-
-    int start = 0;
+    int64_t file_size = std::filesystem::file_size(file_name);
+    int64_t part_size = file_size / n;
+    int64_t remainder = file_size % n;
+    int start_index = 0;
     for (int i = 0; i < n; i++) {
-        int current_part_size = part_size + (i < remainder ? 1 : 0); 
-        parts.push_back(text.substr(start, current_part_size));
-        start += current_part_size;
+        start_indexes.push_back(start_index);
+        start_index += part_size;
+        if (remainder > 0) {
+            start_index ++;
+            remainder --;
+        }
     }
-
-    return parts;
+    return start_indexes;
 }
 
 int main(int argc, char* argv[]) {
@@ -104,22 +104,28 @@ int main(int argc, char* argv[]) {
         std::cerr << "Usage: " << argv[0] << " <input file> <output file> <thread num> <-c/-x>" << std::endl;
         return 1;
     }
-    std::string input = read(argv[1]);
+    // std::string input = read(argv[1]);
     std::string output = argv[2];
     int thread_num = std::stoi(argv[3]);
     std::string mode = argv[4];
     if (mode == "-c") {
+        std::string input_name = argv[1];
         std::vector<CompressedBlockData*> blocks;
-        std::vector<std::string> parts = split(input, thread_num);
-        for (int i = 0; i < thread_num; i++) {
-            blocks.push_back(new CompressedBlockData(i));
+        std::vector<int> start_indexes = get_start_index(input_name, thread_num);
+        std::vector<int> max_counts;
+        for (int i = 0; i < thread_num; i ++) {
+            if (i == thread_num - 1) {
+                max_counts.push_back(std::filesystem::file_size(input_name) - start_indexes[i]);
+            } else {
+                max_counts.push_back(start_indexes[i + 1] - start_indexes[i]);
+            }
+        }
+        for (int i = 0; i < thread_num; i ++) {
+            blocks.push_back(new CompressedBlockData(i, input_name, start_indexes[i], max_counts[i]));
         }
         #pragma omp parallel for num_threads(thread_num) schedule(static)
-        for (int i = 0; i < thread_num; i++) {
-            for (char c : parts[i]) {
-                blocks[i]->push_back(c);
-            }
-            blocks[i]->flush();
+        for (int i = 0; i < thread_num; i ++) {
+            blocks[i]->run();
         }
         write(output, blocks);
         for (auto block : blocks) {
@@ -127,9 +133,8 @@ int main(int argc, char* argv[]) {
         }
     }
     else if (mode == "-x") {
-        std::string compressed_data = input;
-        std::vector<uint8_t> compressed_data_u8 = stringToU8(compressed_data);
-        std::vector<DepressedBlockData*> decompressed_data = gzip_decompress(compressed_data_u8, thread_num);
+        std::string input_name = argv[1];
+        std::vector<DepressedBlockData*> decompressed_data = gzip_decompress(input_name, thread_num);
         write(output, decompressed_data);
     }
     else {

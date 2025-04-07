@@ -384,32 +384,40 @@ void get_canonical_codes(std::vector<std::pair<uint16_t, uint8_t>>& codes, std::
     }
 }
 
-std::vector<DepressedBlockData*> gzip_decompress(const std::vector<uint8_t>& compressed_data, int thread_num) {
+std::vector<DepressedBlockData*> gzip_decompress(const std::string input_name, int thread_num) {
     // std::vector<uint8_t> data = compressed_data;
     std::vector<int> start_indexes;
     std::vector<int> end_indexes;
-    int batch_size = compressed_data.size() / thread_num;
+    int size = std::filesystem::file_size(input_name);
+    int batch_size = size / thread_num;
+    std::ifstream in(input_name, std::ios::binary);
     for (int i = 0; i < thread_num; i++) {
-        start_indexes.push_back(findNextMagicNumber(compressed_data, i * batch_size));
+        in.seekg(i * batch_size);
+        start_indexes.push_back(findNextMagicNumber(in));
         if (i == 0) {
 
         } else {
             end_indexes.push_back(start_indexes[i]);
         }
     }
-    end_indexes.push_back(compressed_data.size());
+    end_indexes.push_back(size);
+    in.close();
     std::vector<DepressedBlockData*> blocks;
     for (int i = 0; i < thread_num; i ++) {
         blocks.push_back(new DepressedBlockData(i));
     }
     #pragma omp parallel for num_threads(thread_num) schedule(static)
     for (int i = 0; i < thread_num; i ++) {
+        std::ifstream local_in(input_name, std::ios::binary);
+        local_in.seekg(start_indexes[i]);
+        int buffer_size = end_indexes[i] - start_indexes[i];
+        std::vector<uint8_t> compressed_data(buffer_size);
+        local_in.read(reinterpret_cast<char*>(compressed_data.data()), buffer_size);
 
-        std::vector<uint8_t> block_data(compressed_data.begin() + start_indexes[i], compressed_data.begin() + end_indexes[i]);
-        while (block_data.size() > 0) {
+        while (compressed_data.size() > 0) {
             // std::cout << "block_data size: " << block_data.size() << std::endl;
             std::vector<LZ77Token> lz77_encoded;
-            std::vector<uint8_t> data = blocks[i]->get_raw_data(block_data);
+            std::vector<uint8_t> data = blocks[i]->get_raw_data(compressed_data);
             int char_length_huff_size = deserialize_int(data);
             // std::cout << "char_huff_size: " << char_length_huff_size << std::endl;
             std::vector<std::pair<uint16_t, uint8_t>> char_huffman_table;
@@ -521,15 +529,37 @@ std::vector<DepressedBlockData*> gzip_decompress(const std::vector<uint8_t>& com
             std::string lz77_data = lz77_decompress(lz77_encoded);
             blocks[i]->insert(lz77_data);
         }
+        local_in.close();
     }
     return blocks;
 }
 
 
-int findNextMagicNumber(const std::vector<uint8_t>& compressed_data, int start) {
-    for (int i = start; i < start + BLOCK_SIZE + 6; i ++) {
-        if (compressed_data[i] == 0x5A && compressed_data[i + 1] == 0x4C && compressed_data[i + 2] == 0x47 && compressed_data[i + 3] == 0x50 && compressed_data[i + 4] == 0x01) {
-            return i;
+int findNextMagicNumber(std::ifstream& in) {
+    const int BUFFER_SIZE = 1024;
+    char buffer[BUFFER_SIZE];
+    
+    std::streampos initialPosition;
+    
+    while (in.good()) {
+        initialPosition = in.tellg();
+        in.read(buffer, BUFFER_SIZE);
+        int bytesRead = in.gcount();
+        
+        if (bytesRead == 0) break;
+        
+        for (int i = 0; i < bytesRead - 4; i++) {
+            if (static_cast<unsigned char>(buffer[i]) == 0x5A && 
+                static_cast<unsigned char>(buffer[i+1]) == 0x4C && 
+                static_cast<unsigned char>(buffer[i+2]) == 0x47 && 
+                static_cast<unsigned char>(buffer[i+3]) == 0x50 && 
+                static_cast<unsigned char>(buffer[i+4]) == 0x01) {
+                return static_cast<int>(initialPosition) + i;
+            }
+        }
+        
+        if (bytesRead >= 5) {
+            in.seekg(-5, std::ios::cur);
         }
     }
     return -1;
