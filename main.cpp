@@ -64,18 +64,35 @@ void write(const std::string& out_filename, std::vector<CompressedBlockData*>& b
 }
 
 bool diff(const std::string& a, const std::string& b) {
-    if (a.size() != b.size()) {
-        std::cerr << "Different sizes: " << a.size() << " vs " << b.size() << std::endl;
-        return false;
-    }
+    // if (a.size() != b.size()) {
+    //     std::cerr << "Different sizes: " << a.size() << " vs " << b.size() << std::endl;
+    //     return false;
+    // }
     // std::cout << b[b.size() - 1] << std::endl;
-    for (size_t i = 0; i < a.size(); i ++) {
-        if (a[i] != b[i]) {
-            std::cerr << "Mismatch at position " << i << ": " << a[i] << " vs " << b[i] << std::endl;
-            return false;
+    // for (size_t i = 0; i < a.size(); i ++) {
+    //     if (a[i] != b[i]) {
+    //         std::cerr << "Mismatch at position " << i << ": " << a[i] << " vs " << b[i] << std::endl;
+    //         return false;
+    //     }
+    // }
+    std::ifstream file_a(a, std::ios::binary);
+    std::ifstream file_b(b, std::ios::binary);
+    for (;;) {
+        char byte_a, byte_b;
+        file_a.read(&byte_a, sizeof(byte_a));
+        file_b.read(&byte_b, sizeof(byte_b));
+        if (file_a.eof() && file_b.eof()) {
+            break;  
+        }
+        if (file_a.eof() || file_b.eof()) {
+            std::cerr << "Files have different sizes." << std::endl;
+            // return false;
+        }
+        if (byte_a != byte_b) {
+            std::cerr << "Mismatch at position " << file_a.tellg() << ": " << byte_a << " vs " << byte_b << std::endl;
+            // return false;
         }
     }
-
     return true;
 }
 
@@ -136,6 +153,7 @@ int main(int argc, char* argv[]) {
         std::string input_name = argv[1];
         std::vector<DepressedBlockData*> decompressed_data = gzip_decompress(input_name, thread_num);
         write(output, decompressed_data);
+        // diff(output, "data/random_data.txt");
     }
     else {
         std::cerr << "Usage: " << argv[0] << " <input file> <output file> <thread num> <-c/-x>" << std::endl;

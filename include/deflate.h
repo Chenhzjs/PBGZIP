@@ -16,7 +16,7 @@
 
 #include "serialize.h"
 
-#define MAX_WINDOW_SIZE 511
+#define MAX_WINDOW_SIZE 255
 #define MAX_LOOKAHEAD_SIZE 20
 
 constexpr uint32_t MAGIC = 0x50474C5A;
@@ -36,9 +36,11 @@ struct HuffmanNode {
     HuffmanNode(uint16_t d, int f) : data(d), freq(f), left(nullptr), right(nullptr) {}
 };
 
+std::string binary_left_shift(const std::string& binary);
 
+std::string binary_add_one(const std::string& binary);
 
-int findNextMagicNumber(std::ifstream& in);
+int64_t findNextMagicNumber(std::ifstream& in);
 
 std::vector<LZ77Token> lz77_compress(const std::string& input, int window_size = MAX_WINDOW_SIZE, int lookahead_size = MAX_LOOKAHEAD_SIZE);
 
@@ -153,10 +155,12 @@ private:
         file.write(reinterpret_cast<const char*>(&MAGIC), sizeof(MAGIC));
         file.write(reinterpret_cast<const char*>(&VERSION), sizeof(VERSION));
         uint16_t block_size = compressed_data.size();
+        // std::cout << "block_size: " << block_size << std::endl;
         file.write(reinterpret_cast<const char*>(&block_size), sizeof(block_size));
         file.write(reinterpret_cast<const char*>(compressed_data.data()), compressed_data.size());
         uint32_t checksum = crc32(0L, Z_NULL, 0);  
         checksum = crc32(checksum, compressed_data.data(), compressed_data.size());
+        // printf("checksum: %x\n", checksum);
         file.write(reinterpret_cast<const char*>(&checksum), sizeof(checksum));
         file.flush();
         data.clear();
@@ -183,24 +187,28 @@ private:
 class DepressedBlockData {
 public:
     DepressedBlockData(int now_thread) : now_thread(now_thread) {}
-    std::vector<uint8_t> get_raw_data(std::vector<uint8_t>& block_data) {
+    std::vector<uint8_t> get_raw_data(Compressed& block_data) {
         // std::vector<uint8_t> data = block_data;
         // std::cout << block_data.size() << std::endl;
         // int before_size = block_data.size();
+        // std::cout << block_data.cur << std::endl;
+        // std::cout << block_data.compressed_data.size() << std::endl;
         int magic = deserialize_int(block_data);
         uint8_t version = deserialize_uint8_t(block_data);
         uint16_t block_size = deserialize_uint16_t(block_data);
         std::vector<uint8_t> raw_data;
+        // std::cout << "block_size: " << block_size << std::endl;
         // std::cout << block_data.size() << std::endl;
         for (int i = 0; i < block_size; i ++) {
             raw_data.push_back(deserialize_uint8_t(block_data));
         }
         // std::cout << "now_thread: " << now_thread << " block_size: " << block_size << std::endl;
-        int crc = deserialize_int(block_data);
+        uint32_t crc = deserialize_int(block_data);
         // int after_size = block_data.size();
         // std::cout << "block_data size: " << before_size - after_size << std::endl;
-        int checksum = crc32(0L, Z_NULL, 0);
+        uint32_t checksum = crc32(0L, Z_NULL, 0);
         checksum = crc32(checksum, raw_data.data(), raw_data.size());
+        // printf("crc: %x checksum: %x\n", crc, checksum);
         if (crc != checksum) {
             throw std::runtime_error("Checksum mismatch");
         }
